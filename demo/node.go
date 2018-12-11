@@ -7,16 +7,20 @@ import (
    "flag"
    "fmt"
    "log"
-   "os"
+   "math/big"
    "net"
    "net/http"
+   "os"
 )
 
 type Node struct {
+   Id uint
    Host string
    Port int
    Peers []string
    Failing bool
+   PropNum uint
+   HighestId uint
 }
 
 var (
@@ -32,6 +36,16 @@ func formUrl(sockAddr string, path string) string {
    return fmt.Sprintf("http://%s%s", sockAddr, path)
 }
 
+func nextPrime(lower uint) uint {
+   var maybePrime uint = lower + (1 + lower % 2)
+
+   for !big.NewInt(int64(maybePrime)).ProbablyPrime(20) {
+      maybePrime += 2
+   }
+
+   return maybePrime
+}
+
 func init() {
    flag.StringVar(&me.Host, "host", "localhost", "url of node")
    flag.IntVar(&me.Port, "port", 3000, "port of node")
@@ -45,6 +59,11 @@ func checkError(err error) {
    }
 }
 
+type connResp struct {
+   Id uint
+   Peers []string
+}
+
 func (me *Node) connect(contact string) {
    // send my socket address to the provided contact
    url := formUrl(contact, "/join")
@@ -55,9 +74,13 @@ func (me *Node) connect(contact string) {
    checkError(err)
 
    // add the peers from the response to my peer list
-   var peers []string
-   json.NewDecoder(resp.Body).Decode(&peers)
-   for _, peer := range peers {
+   var respData struct {
+      id uint
+      peers []string
+   }
+   json.NewDecoder(resp.Body).Decode(&respData)
+   me.Id = respData.id
+   for _, peer := range respData.peers {
       me.Peers = append(me.Peers, peer)
    }
    resp.Body.Close()
@@ -72,10 +95,25 @@ func (me *Node) addNode(w http.ResponseWriter, r *http.Request) {
    checkError(err)
 
    // respond with my socket address appended to peer list
-   json.NewEncoder(w).Encode(append(me.Peers, me.getSockAddr()))
+   me.HighestId = nextPrime(me.HighestId)
+   respData := struct {
+      id uint
+      peers []string
+   }{
+      me.HighestId,
+      append(me.Peers, me.getSockAddr()),
+   }
+   json.NewEncoder(w).Encode(respData)
 
    // send new node's socket address to peers
-   encoded, err := json.Marshal([]string{newNode})
+   nodeData := struct {
+      id uint
+      sockAddr string
+   }{
+      me.HighestId,
+      newNode,
+   }
+   encoded, err := json.Marshal(nodeData)
    checkError(err)
    payload := bytes.NewBuffer(encoded)
    for _, peer := range me.Peers {
@@ -94,12 +132,16 @@ func (me *Node) addNode(w http.ResponseWriter, r *http.Request) {
 // update peer list when told about a new node
 func (me *Node) updatePeers(w http.ResponseWriter, r *http.Request) {
    // obtain new node's socket address from request
-   var newNode string
-   err := json.NewDecoder(r.Body).Decode(&newNode)
+   var nodeData struct {
+      id uint
+      sockAddr string
+   }
+   err := json.NewDecoder(r.Body).Decode(&nodeData)
    checkError(err)
 
    // add new node's socket address to my peer list
-   me.Peers = append(me.Peers, newNode)
+   me.HighestId = nodeData.id
+   me.Peers = append(me.Peers, nodeData.sockAddr)
 }
 
 func (me *Node) getInput() {
@@ -115,8 +157,13 @@ func (me *Node) getInput() {
 }
 
 func main() {
+   fmt.Println("starting")
    flag.Parse()
-   if contact != "" {
+   if contact == "" {
+      me.Id = 1
+      me.PropNum = 1
+      me.HighestId = 1
+   } else {
       go me.connect(contact)
    }
 
