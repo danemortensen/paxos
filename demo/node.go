@@ -1,7 +1,6 @@
 package main
 
 import (
-   "bufio"
    "bytes"
    "encoding/json"
    "flag"
@@ -10,7 +9,8 @@ import (
    "math/big"
    "net"
    "net/http"
-   "os"
+
+   "github.com/danemortensen/paxos"
 )
 
 type Node struct {
@@ -21,6 +21,9 @@ type Node struct {
    Failing bool
    PropNum uint
    HighestId uint
+
+   paxos.Proposer
+   paxos.Acceptor
 }
 
 var (
@@ -60,35 +63,32 @@ func checkError(err error) {
 }
 
 type connResp struct {
-   Id uint
-   Peers []string
+   id uint
+   peers []string
 }
 
 func (me *Node) connect(contact string) {
    // send my socket address to the provided contact
    url := formUrl(contact, "/join")
-   encoded, err := json.Marshal(url)
+   encoded, err := json.Marshal(me.getSockAddr())
    checkError(err)
    payload := bytes.NewBuffer(encoded)
    resp, err := http.Post(url, "application/json", payload)
    checkError(err)
+   defer resp.Body.Close()
 
-   // add the peers from the response to my peer list
-   var respData struct {
-      id uint
-      peers []string
-   }
+   var respData map[string]interface{}
    json.NewDecoder(resp.Body).Decode(&respData)
-   me.Id = respData.id
-   for _, peer := range respData.peers {
-      me.Peers = append(me.Peers, peer)
+   me.Id = uint(respData["id"].(float64))
+   for _, peer := range respData["peers"].([]interface{}) {
+      me.Peers = append(me.Peers, peer.(string))
+      log.Print("Added peer ", peer)
    }
-   resp.Body.Close()
+   me.Proposer.Acceptors = me.Peers
 }
 
 // add a new node and update peers
 func (me *Node) addNode(w http.ResponseWriter, r *http.Request) {
-   fmt.Println("adding node")
    // obtain new node's socket address from request
    var newNode string
    err := json.NewDecoder(r.Body).Decode(&newNode)
@@ -96,29 +96,23 @@ func (me *Node) addNode(w http.ResponseWriter, r *http.Request) {
 
    // respond with my socket address appended to peer list
    me.HighestId = nextPrime(me.HighestId)
-   respData := struct {
-      id uint
-      peers []string
-   }{
-      me.HighestId,
-      append(me.Peers, me.getSockAddr()),
+   respData := map[string]interface{} {
+      "id": me.HighestId,
+      "peers": append(me.Peers, me.getSockAddr()),
    }
    json.NewEncoder(w).Encode(respData)
 
    // send new node's socket address to peers
-   nodeData := struct {
-      id uint
-      sockAddr string
-   }{
-      me.HighestId,
-      newNode,
+   nodeData := map[string]interface{} {
+      "id": me.HighestId,
+      "sockAddr": newNode,
    }
    encoded, err := json.Marshal(nodeData)
    checkError(err)
    payload := bytes.NewBuffer(encoded)
    for _, peer := range me.Peers {
       go func() {
-         url := peer + "/add"
+         url := formUrl(peer, "/add")
          resp, err := http.Post(url, "application/json", payload)
          checkError(err)
          resp.Body.Close()
@@ -127,37 +121,25 @@ func (me *Node) addNode(w http.ResponseWriter, r *http.Request) {
 
    // add new node's socket address to my peer list
    me.Peers = append(me.Peers, newNode)
+   me.Proposer.Acceptors = me.Peers
+   log.Print("Added peer ", newNode)
 }
 
 // update peer list when told about a new node
-func (me *Node) updatePeers(w http.ResponseWriter, r *http.Request) {
+func (me *Node) updatePeerList(w http.ResponseWriter, r *http.Request) {
    // obtain new node's socket address from request
-   var nodeData struct {
-      id uint
-      sockAddr string
-   }
+   var nodeData map[string]interface{}
    err := json.NewDecoder(r.Body).Decode(&nodeData)
    checkError(err)
 
    // add new node's socket address to my peer list
-   me.HighestId = nodeData.id
-   me.Peers = append(me.Peers, nodeData.sockAddr)
-}
-
-func (me *Node) getInput() {
-   scanner := bufio.NewScanner(os.Stdin)
-   var input string
-
-   for {
-      fmt.Printf("Enter a command: ")
-      scanner.Scan()
-      input = scanner.Text()
-      fmt.Println(input)
-   }
+   me.HighestId = uint(nodeData["id"].(float64))
+   me.Peers = append(me.Peers, nodeData["sockAddr"].(string))
+   me.Proposer.Acceptors = me.Peers
+   log.Print("Added peer ", nodeData["sockAddr"])
 }
 
 func main() {
-   fmt.Println("starting")
    flag.Parse()
    if contact == "" {
       me.Id = 1
@@ -168,10 +150,15 @@ func main() {
    }
 
    http.HandleFunc("/join", me.addNode)
-   http.HandleFunc("/add", me.updatePeers)
+   http.HandleFunc("/add", me.updatePeerList)
+
+   me.Proposer = paxos.NewProposer(me.Id, me.Peers)
+   me.Acceptor = paxos.NewAcceptor()
+   me.BeProposer()
+   me.BeAcceptor()
 
    listener, err := net.Listen("tcp", me.getSockAddr())
    checkError(err)
-   go me.getInput()
+   log.Print("Node running on ", me.getSockAddr())
    log.Fatal(http.Serve(listener, nil))
 }

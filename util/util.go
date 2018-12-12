@@ -31,15 +31,15 @@ func IsMajority(accepts []string, numAcceptors int) bool {
    return numAccepts > numAcceptors / 2
 }
 
-func IsMajority(confirmations []bool, numAcceptors int) bool {
-   numCommits := 0
-   for _, commit := range confirmations {
-      if commit {
-         numCommits += 1
-      }
-   }
-   return numCommits > numAcceptors / 2
-}
+//func IsMajority(confirmations []bool, numAcceptors int) bool {
+   //numCommits := 0
+   //for _, commit := range confirmations {
+      //if commit {
+         //numCommits += 1
+      //}
+   //}
+   //return numCommits > numAcceptors / 2
+//}
 
 func RemoveRejects(votes []string) []string {
    var accepts []string
