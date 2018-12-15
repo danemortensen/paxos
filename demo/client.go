@@ -35,14 +35,12 @@ func write(proposer string, val string) {
 
 func read(proposer string) {
    url := paxos.FormUrl(proposer, "/read")
-   fmt.Println("reading")
    resp, err := http.Get(url)
    if err != nil {
       fmt.Println("node not available")
       return
    }
    defer resp.Body.Close()
-   fmt.Println("reading more")
 
    var respData map[string]interface{}
    json.NewDecoder(resp.Body).Decode(&respData)

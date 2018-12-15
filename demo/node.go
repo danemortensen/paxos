@@ -103,21 +103,22 @@ func (me *Node) addNode(w http.ResponseWriter, r *http.Request) {
    }
    json.NewEncoder(w).Encode(respData)
 
-   // send new node's socket address to peers
-   nodeData := map[string]interface{} {
-      "id": me.HighestId,
-      "sockAddr": newNode,
-   }
-   encoded, err := json.Marshal(nodeData)
-   checkError(err)
-   payload := bytes.NewBuffer(encoded)
    for _, peer := range me.Peers {
-      go func() {
+      go func(peer string) {
+         // send new node's socket address to peers
+         nodeData := map[string]interface{} {
+            "id": me.HighestId,
+            "sockAddr": newNode,
+         }
+         encoded, err := json.Marshal(nodeData)
+         checkError(err)
+         payload := bytes.NewBuffer(encoded)
+
          url := formUrl(peer, "/add")
          resp, err := http.Post(url, "application/json", payload)
          checkError(err)
          resp.Body.Close()
-      }()
+      }(peer)
    }
 
    // add new node's socket address to my peer list

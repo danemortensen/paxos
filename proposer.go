@@ -77,6 +77,7 @@ func (me *Proposer) Read(w http.ResponseWriter, r *http.Request) {
 
    // wait for all acceptors to respond
    wg.Wait()
+   log.Print(vals)
 
    // get frequencies of the values the acceptors gave us
    freqs := make(map[string]int)
@@ -101,7 +102,7 @@ func (me *Proposer) Read(w http.ResponseWriter, r *http.Request) {
    // determine whether a majority of acceptors
    // have replied with the same value
    var status int
-   if maxFreq > (numAcceptors + 1) / 2 {
+   if maxFreq > numAcceptors / 2 {
       status = accept
    } else {
       status = reject
