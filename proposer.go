@@ -30,6 +30,7 @@ func NewProposer(id uint, acceptors []string) Proposer {
 
 func (me *Proposer) BeProposer() {
    http.HandleFunc("/set", me.Propose)
+   http.HandleFunc("/read", me.Read)
 }
 
 func (me *Proposer) Propose(w http.ResponseWriter, r *http.Request) {
@@ -38,8 +39,80 @@ func (me *Proposer) Propose(w http.ResponseWriter, r *http.Request) {
    CheckError(err)
 
    log.Print("Proposing value ", val)
-   accepts := me.Prepare()
+   acceptors := me.Prepare()
    me.Accept(acceptors, val)
+}
+
+func (me *Proposer) Read(w http.ResponseWriter, r *http.Request) {
+   log.Print("reading")
+   numAcceptors := len(me.Acceptors)
+   var wg sync.WaitGroup
+   wg.Add(numAcceptors)
+
+   // ask each acceptor for their value
+   vals := make([]string, numAcceptors)
+   for i, acceptor := range me.Acceptors {
+      go func(i int, acceptor string) {
+         defer wg.Done()
+
+         // get the value acceptor is storing
+         url := FormUrl(acceptor, "/retrieve")
+         resp, err := http.Get(url)
+         defer resp.Body.Close()
+
+         // acceptor is down
+         if err != nil {
+            log.Print(err)
+            vals[i] = ""
+         }
+
+         // decode acceptor's response
+         var val string
+         json.NewDecoder(resp.Body).Decode(&val)
+         log.Print(val)
+
+         vals[i] = val
+      }(i, acceptor)
+   }
+
+   // wait for all acceptors to respond
+   wg.Wait()
+
+   // get frequencies of the values the acceptors gave us
+   freqs := make(map[string]int)
+   for _, val := range vals {
+      if _, ok := freqs[val]; ok {
+         freqs[val] += 1
+      } else {
+         freqs[val] = 1
+      }
+   }
+
+   // find the max frequency and the most common value
+   maxFreq := 0
+   mostFreqVal := ""
+   for val, freq := range freqs {
+      if freq > maxFreq {
+         maxFreq = freq
+         mostFreqVal = val
+      }
+   }
+
+   // determine whether a majority of acceptors
+   // have replied with the same value
+   var status int
+   if maxFreq > (numAcceptors + 1) / 2 {
+      status = accept
+   } else {
+      status = reject
+   }
+
+   // reply to request
+   respData := map[string]interface{} {
+      "status": status,
+      "val": mostFreqVal,
+   }
+   json.NewEncoder(w).Encode(respData)
 }
 
 /*
@@ -178,12 +251,14 @@ func (me *Proposer) Accept(acceptors []string, val string) bool {
       }(i, acceptor)
    }
 
-   //return IsMajority(commits, len(me.numAcceptors))
+   wg.Wait()
+
    return true
 }
 
 // returns the next highest multiple of this proposer's id
 func (me *Proposer) getPropNum(prevPropNum uint) uint {
+   log.Print("my propNum: ", me.Id)
    propNum := (prevPropNum / me.Id) * me.Id
 
    var i uint = 0

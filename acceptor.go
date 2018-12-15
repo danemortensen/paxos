@@ -22,6 +22,8 @@ func NewAcceptor() Acceptor {
 
 func (me *Acceptor) BeAcceptor() {
    http.HandleFunc("/propose", me.Promise)
+   http.HandleFunc("/commit", me.Commit)
+   http.HandleFunc("/retrieve", me.SendVal)
 }
 
 func (me *Acceptor) Promise(w http.ResponseWriter, r *http.Request) {
@@ -85,4 +87,8 @@ func (me *Acceptor) Commit(w http.ResponseWriter, r *http.Request) {
       "status": status,
    }
    json.NewEncoder(w).Encode(&ack)
+}
+
+func (me *Acceptor) SendVal(w http.ResponseWriter, r *http.Request) {
+   json.NewEncoder(w).Encode(&me.Store)
 }

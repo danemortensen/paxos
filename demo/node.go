@@ -80,6 +80,7 @@ func (me *Node) connect(contact string) {
    var respData map[string]interface{}
    json.NewDecoder(resp.Body).Decode(&respData)
    me.Id = uint(respData["id"].(float64))
+   me.Proposer.Id = me.Id
    for _, peer := range respData["peers"].([]interface{}) {
       me.Peers = append(me.Peers, peer.(string))
       log.Print("Added peer ", peer)
